@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "hyperbundler",
-    "lint": "ESLINT_USE_FLAT_CONFIG=true eslint -c .config/eslint.config.js .",
-    "lint:fix": "ESLINT_USE_FLAT_CONFIG=true eslint -c .config/eslint.config.js --fix .",
+    "lint": "eslint -c .config/eslint.config.js .",
+    "lint:fix": "eslint -c .config/eslint.config.js --fix .",
     "format": "prettier --config .config/prettier.config.js --write ."
   },
   "sideEffects": false,
@@ -27,13 +27,13 @@
     }
   },
   "devDependencies": {
-    "@hypernym/bundler": "^0.8.1",
-    "@hypernym/eslint-config": "^2.0.5",
-    "@hypernym/prettier-config": "^2.0.4",
-    "@hypernym/tsconfig": "^1.2.0",
-    "@types/node": "^20.12.2",
-    "eslint": "^8.57.0",
+    "@hypernym/bundler": "^0.9.0",
+    "@hypernym/eslint-config": "^3.0.0",
+    "@hypernym/prettier-config": "^3.0.0",
+    "@hypernym/tsconfig": "^2.0.0",
+    "@types/node": "^20.12.7",
+    "eslint": "^9.0.0",
     "prettier": "^3.2.5",
-    "typescript": "^5.4.3"
+    "typescript": "^5.4.5"
   }
 }
