@@ -1,8 +1,6 @@
 // Inspired by ScrollTimeline JS API from Scroll Timeline, 1.0.0, Apache-2.0 License, https://github.com/flackr/scroll-timeline
 // Rewritten and adapted to TypeScript, 0.1.0, Apache-2.0 License, https://github.com/ivodolenc/scroll-timeline-polyfill
 
-// All credits go to the original authors, https://github.com/flackr/scroll-timeline
-
 // Copyright 2019 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,66 +15,60 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-const defaultAxis = 'block'
-const scrollTimelineOptions = new WeakMap()
-const sourceDetails = new WeakMap()
+import type {
+  TimelineAxis,
+  TimelinePhase,
+  SourceMeasurements,
+  SourceDetails,
+  TimelineOptions,
+  ScrollTimelineOptions,
+  ScrollTimeline as ST,
+} from './types'
 
-function normalizeAxis(axis: string, computedStyle: any) {
-  if (['x', 'y'].includes(axis)) return axis
+const timelineOptions: WeakMap<ScrollTimeline, TimelineOptions> = new WeakMap()
+const sourceDetails: WeakMap<Element, SourceDetails> = new WeakMap()
 
-  if (!computedStyle) {
-    throw new Error(
-      'To determine the normalized axis the computedStyle of the source is required.',
-    )
-  }
-
-  const horizontalWritingMode = computedStyle.writingMode == 'horizontal-tb'
-  if (axis === 'block') {
-    axis = horizontalWritingMode ? 'y' : 'x'
-  } else if (axis === 'inline') {
-    axis = horizontalWritingMode ? 'x' : 'y'
-  } else {
-    throw new TypeError(`Invalid axis “${axis}”`)
-  }
-
-  return axis
-}
-
-function scrollEventSource(source: Element) {
+/**
+ * Specifies event source element.
+ */
+function scrollEventSource(source: HTMLElement) {
   if (source === document.scrollingElement) return document
   return source
 }
 
-function directionAwareScrollOffset(source: Element, axis: string) {
-  if (!source) return null
-  const sourceMeasurements = sourceDetails.get(source).sourceMeasurements
-  const style = getComputedStyle(source)
+/**
+ * Calculates a scroll offset that corrects for writing modes, text direction and a logical axis.
+ */
+function directionAwareScrollOffset(
+  source: HTMLElement,
+  axis: TimelineAxis,
+): number {
+  const measurements = sourceDetails.get(source)!.sourceMeasurements
+  let currentScrollOffset = measurements.scrollTop
 
-  let currentScrollOffset = sourceMeasurements.scrollTop
-  if (normalizeAxis(axis, style) === 'x') {
-    currentScrollOffset = Math.abs(sourceMeasurements.scrollLeft)
-  }
+  if (axis === 'x') currentScrollOffset = Math.abs(measurements.scrollLeft)
+
   return currentScrollOffset
 }
 
-function calculateMaxScrollOffset(source: Element, axis: string) {
-  const sourceMeasurements = sourceDetails.get(source).sourceMeasurements
-  const horizontalWritingMode =
-    getComputedStyle(source).writingMode == 'horizontal-tb'
-  if (axis === 'block') axis = horizontalWritingMode ? 'y' : 'x'
-  else if (axis === 'inline') axis = horizontalWritingMode ? 'x' : 'y'
-  if (axis === 'y')
-    return sourceMeasurements.scrollHeight - sourceMeasurements.clientHeight
+/**
+ * Calculates scroll offset based on axis and source geometry.
+ */
+function calculateMaxScrollOffset(
+  source: HTMLElement,
+  axis: TimelineAxis,
+): number {
+  const measurements = sourceDetails.get(source)!.sourceMeasurements
 
-  return sourceMeasurements.scrollWidth - sourceMeasurements.clientWidth
+  if (axis === 'y') return measurements.scrollHeight - measurements.clientHeight
+
+  return measurements.scrollWidth - measurements.clientWidth
 }
 
-function isValidAxis(axis: string) {
-  return ['block', 'inline', 'x', 'y'].includes(axis)
-}
-
-function measureSource(source: Element) {
-  const style = getComputedStyle(source)
+/**
+ * Read measurements of source element.
+ */
+function measureSource(source: Element): SourceMeasurements {
   return {
     scrollLeft: source.scrollLeft,
     scrollTop: source.scrollTop,
@@ -84,50 +76,51 @@ function measureSource(source: Element) {
     scrollHeight: source.scrollHeight,
     clientWidth: source.clientWidth,
     clientHeight: source.clientHeight,
-    writingMode: style.writingMode,
-    direction: style.direction,
-    scrollPaddingTop: style.scrollPaddingTop,
-    scrollPaddingBottom: style.scrollPaddingBottom,
-    scrollPaddingLeft: style.scrollPaddingLeft,
-    scrollPaddingRight: style.scrollPaddingRight,
   }
 }
 
-function updateMeasurements(source: Element) {
-  const details = sourceDetails.get(source)
+/**
+ * Update measurements of source, and update timelines.
+ */
+function updateMeasurements(source: HTMLElement) {
+  const details = sourceDetails.get(source)!
   details.sourceMeasurements = measureSource(source)
+
+  // Update measurements of the subject of connected view timelines
+  for (const ref of details.timelineRefs) ref.deref()
 
   if (details.updateScheduled) return
 
   setTimeout(() => {
-    for (const ref of details.timelineRefs) {
-      ref.deref()
-    }
-
+    // Schedule a task to update timelines after all measurements are completed
+    for (const ref of details.timelineRefs) ref.deref()
     details.updateScheduled = false
   })
   details.updateScheduled = true
 }
 
-function updateSource(timeline: any, source: Element | null) {
-  const timelineDetails = scrollTimelineOptions.get(timeline)
+function updateSource(timeline: ScrollTimeline, source: HTMLElement | null) {
+  const timelineDetails = timelineOptions.get(timeline)!
   const oldSource = timelineDetails.source
-  if (oldSource == source) return
+  if (oldSource === source) return
 
   if (oldSource) {
     const details = sourceDetails.get(oldSource)
     if (details) {
-      details.timelineRefs.delete(timeline)
+      // Remove timeline reference from old source
+      details.timelineRefs.delete(timeline as unknown as WeakRef<ST>)
 
+      // Clean up timeline refs that have been garbage-collected
       const undefinedRefs = Array.from(details.timelineRefs).filter(
-        (ref: any) => typeof ref.deref() === 'undefined',
+        (ref) => typeof ref.deref() === 'undefined',
       )
-      for (const ref of undefinedRefs) {
-        details.timelineRefs.delete(ref)
-      }
+
+      for (const ref of undefinedRefs) details.timelineRefs.delete(ref)
 
       if (details.timelineRefs.size === 0) {
-        details.disconnect()
+        // All timelines have been disconnected from the source
+        // Clean up
+        details?.disconnect?.()
         sourceDetails.delete(oldSource)
       }
     }
@@ -136,29 +129,30 @@ function updateSource(timeline: any, source: Element | null) {
   timelineDetails.source = source
 
   if (source) {
-    let details = sourceDetails.get(source)
+    let details = sourceDetails.get(source)!
     if (!details) {
+      // This is the first timeline for this source
+      // Store a set of weak refs to connected timelines and current measurements
       details = {
         timelineRefs: new Set(),
         sourceMeasurements: measureSource(source),
       }
       sourceDetails.set(source, details)
 
+      // Use resize observer to detect changes to source size
       const resizeObserver = new ResizeObserver((entries) => {
         for (let i = 0, l = entries.length; i < l; i++) {
-          updateMeasurements(timelineDetails.source)
+          updateMeasurements(timelineDetails.source!)
         }
       })
 
       resizeObserver.observe(source)
+      for (const child of source.children) resizeObserver.observe(child)
 
-      for (const child of source.children) {
-        resizeObserver.observe(child)
-      }
-
+      // Use mutation observer to detect updated style attributes on source element
       const mutationObserver = new MutationObserver((records) => {
         for (const record of records) {
-          if (record.target instanceof Element) {
+          if (record.target instanceof HTMLElement) {
             updateMeasurements(record.target)
           }
         }
@@ -170,12 +164,11 @@ function updateSource(timeline: any, source: Element | null) {
       })
 
       const scrollListener = () => {
+        // Sample and store scroll pos
         details.sourceMeasurements.scrollLeft = source.scrollLeft
         details.sourceMeasurements.scrollTop = source.scrollTop
 
-        for (const ref of details.timelineRefs) {
-          ref.deref()
-        }
+        for (const ref of details.timelineRefs) ref.deref()
       }
 
       scrollEventSource(source).addEventListener('scroll', scrollListener)
@@ -187,81 +180,76 @@ function updateSource(timeline: any, source: Element | null) {
       }
     }
 
+    // Add a weak ref to the timeline so that we can update it when the source changes
     details.timelineRefs.add(new WeakRef(timeline))
   }
 }
 
-export class ScrollTimeline {
-  constructor(options?: {
-    source?: Element | null
-    axis?: 'x' | 'y' | 'block'
-  }) {
-    scrollTimelineOptions.set(this, {
+export class ScrollTimeline implements ST {
+  constructor({
+    source = document.documentElement,
+    axis = 'y',
+  }: ScrollTimelineOptions) {
+    timelineOptions.set(this, {
       source: null,
-      axis: defaultAxis,
+      axis,
     })
 
-    const source =
-      options && options.source !== undefined
-        ? options.source
-        : document.scrollingElement
-
     updateSource(this, source)
-
-    if (options && options.axis !== undefined && options.axis != defaultAxis) {
-      if (!isValidAxis(options.axis)) throw TypeError('Invalid axis')
-      scrollTimelineOptions.get(this).axis = options.axis
-    }
   }
 
-  cancel() {
-    const details = sourceDetails.get(this.source)
-    details.disconnect()
+  cancel(): void {
+    const details = sourceDetails.get(this.source)!
+    details.disconnect?.()
   }
 
-  get source() {
-    return scrollTimelineOptions.get(this).source
+  get source(): HTMLElement {
+    return timelineOptions.get(this)!.source!
   }
   set source(element) {
     updateSource(this, element)
   }
 
-  get axis() {
-    return scrollTimelineOptions.get(this).axis
+  get axis(): TimelineAxis {
+    return timelineOptions.get(this)!.axis
   }
   set axis(axis) {
-    if (!isValidAxis(axis)) throw TypeError('Invalid axis')
-    scrollTimelineOptions.get(this).axis = axis
+    timelineOptions.get(this)!.axis = axis
   }
 
-  get phase() {
+  get phase(): TimelinePhase {
+    // Per https://drafts.csswg.org/scroll-animations-1/#phase-algorithm
+    // Step 1
+    // if source is null
     const container = this.source
     if (!container) return 'inactive'
-    const scrollerStyle = getComputedStyle(container)
 
-    if (scrollerStyle.display == 'none') return 'inactive'
+    const style = getComputedStyle(container)
+    // if source does not currently have a CSS layout box
+    if (style.display === 'none') return 'inactive'
 
+    // if source's layout box is not a scroll container
     if (
-      container != document.scrollingElement &&
-      (scrollerStyle.overflow == 'visible' || scrollerStyle.overflow == 'clip')
-    )
+      container !== document.scrollingElement &&
+      (style.overflow === 'visible' || style.overflow === 'clip')
+    ) {
       return 'inactive'
+    }
 
     return 'active'
   }
 
-  get duration() {
-    return { value: 100 }
-  }
-
-  get currentTime() {
+  get currentTime(): { value: number } | null {
     const unresolved = null
     const container = this.source
+
     if (!container || !container.isConnected) return unresolved
-    if (this.phase == 'inactive') return unresolved
-    const scrollerStyle = getComputedStyle(container)
-    if (scrollerStyle.display === 'inline' || scrollerStyle.display === 'none')
+    if (this.phase === 'inactive') return unresolved
+
+    const style = getComputedStyle(container)
+    if (style.display === 'inline' || style.display === 'none') {
       return unresolved
+    }
 
     const axis = this.axis
     const scrollPos = directionAwareScrollOffset(container, axis)
