@@ -29,5 +29,9 @@ export default defineConfig({
       format: 'umd',
       name: 'ScrollTimelineBase',
     },
+    {
+      // types
+      types: './src/types.ts',
+    },
   ],
 })
